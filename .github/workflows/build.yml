@@ -25,6 +25,17 @@ jobs:
           file seedump
           ls -l seedump
 
+      - name: 编译 dylib（挂进游戏进程内部用）
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -target arm64-apple-ios14.0 \
+                -isysroot "$SDK" \
+                -O2 -Wall -dynamiclib \
+                -install_name @loader_path/seedump.dylib \
+                -o seedump.dylib seedump_dylib.c
+          file seedump.dylib
+          otool -D seedump.dylib
+
       - name: 用 ldid 签名（带上 task_for_pid-allow）
         run: |
           brew install ldid || true
@@ -51,6 +62,7 @@ jobs:
           name: seedump-debs
           path: |
             seedump
+            seedump.dylib
             ents.plist
             seedump_rootless.deb
             seedump_rootful.deb

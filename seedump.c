@@ -19,7 +19,7 @@
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <mach/task_info.h>
 #include <mach-o/dyld_images.h>
 
@@ -38,11 +38,14 @@
 
 static task_t g_task = MACH_PORT_NULL;
 
+// iOS SDK 把 mach_vm.h 直接 #error 掉了，改用一直可用的 vm_read_overwrite
 static int rd(uint64_t addr, void *buf, size_t n) {
-    mach_vm_size_t out = 0;
-    kern_return_t kr = mach_vm_read_overwrite(g_task, (mach_vm_address_t)addr,
-                                              (mach_vm_size_t)n,
-                                              (mach_vm_address_t)(uintptr_t)buf, &out);
+    vm_size_t out = 0;
+    kern_return_t kr = vm_read_overwrite((vm_map_t)g_task,
+                                         (vm_address_t)addr,
+                                         (vm_size_t)n,
+                                         (vm_address_t)(uintptr_t)buf,
+                                         &out);
     return (kr == KERN_SUCCESS && out == n) ? 0 : -1;
 }
 static uint64_t rd64(uint64_t a) { uint64_t v = 0; if (rd(a, &v, 8)) return 0; return v; }

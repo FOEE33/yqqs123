@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """手工构造合法 .deb（标准 ar + gzip tar），不依赖 dpkg-deb 或 macOS 的 BSD ar。
 用法: mkdeb.py <架构名> <二进制> <输出deb>"""
@@ -40,6 +40,18 @@ done
 echo ""
 echo "=== done $(date) ==="
 ls -l /var/mobile/seed_dump.txt 2>&1
+exit 0
+"""
+
+
+POSTRM = r"""#!/bin/sh
+# 卸载时清干净：工具本体、日志、以及运行期产生的文件
+case "$1" in
+  remove|purge)
+    rm -rf /var/mobile/seedump
+    rm -f  /var/mobile/seedump.log
+    ;;
+esac
 exit 0
 """
 
@@ -88,6 +100,7 @@ def main():
     control_tar = tar_gz([
         ("./control", CONTROL.format(arch=arch).encode(), 0o644),
         ("./postinst", POSTINST.encode(), 0o755),
+        ("./postrm", POSTRM.encode(), 0o755),
     ])
     data_tar = tar_gz([
         ("./var/mobile/seedump/seedump", blob, 0o755),

@@ -1,4 +1,4 @@
-﻿name: build-seedump
+name: build-seedump
 
 on:
   push:

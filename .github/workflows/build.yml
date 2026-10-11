@@ -41,7 +41,9 @@ jobs:
           brew install ldid || true
           if command -v ldid >/dev/null 2>&1; then
             ldid -Sents.plist seedump
-            echo "signed ok"
+            echo "signed seedump ok"
+            ldid -S seedump.dylib
+            echo "signed seedump.dylib ok"
             ldid -e seedump || true
           else
             echo "!! ldid 不可用，产物未签名"

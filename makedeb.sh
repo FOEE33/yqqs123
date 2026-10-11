@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # 用法: ./makedeb.sh <架构名> <二进制> <输出deb>
 # 不用 dpkg-deb（macOS 上没有），直接 ar + tar 手工构造合法 .deb
 set -e

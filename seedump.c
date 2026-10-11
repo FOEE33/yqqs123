@@ -16,7 +16,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <libproc.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <mach/task_info.h>
@@ -92,20 +93,28 @@ static int rd_string(uint64_t sp, char *out, size_t max) {
 }
 
 static pid_t find_pid(const char *want) {
-    int n = proc_listallpids(NULL, 0);
-    pid_t *pids;
+    int mib[4];
+    size_t len = 0, n, i;
+    char *buf;
+    struct kinfo_proc *kp;
     pid_t found = -1;
-    int i;
-    if (n <= 0) return -1;
-    pids = (pid_t *)malloc(sizeof(pid_t) * (size_t)(n + 64));
-    if (!pids) return -1;
-    n = proc_listallpids(pids, sizeof(pid_t) * (n + 64));
+
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_ALL;
+    mib[3] = 0;
+    if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0 || len == 0) return -1;
+    buf = (char *)malloc(len);
+    if (!buf) return -1;
+    if (sysctl(mib, 4, buf, &len, NULL, 0) != 0) { free(buf); return -1; }
+
+    kp = (struct kinfo_proc *)buf;
+    n = len / sizeof(struct kinfo_proc);
     for (i = 0; i < n; i++) {
-        char nm[256];
-        memset(nm, 0, sizeof(nm));
-        if (proc_name(pids[i], nm, sizeof(nm)) > 0 && strstr(nm, want)) { found = pids[i]; break; }
+        const char *nm = kp[i].kp_proc.p_comm;
+        if (nm && strstr(nm, want)) { found = kp[i].kp_proc.p_pid; break; }
     }
-    free(pids);
+    free(buf);
     return found;
 }
 

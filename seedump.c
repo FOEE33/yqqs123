@@ -1,4 +1,4 @@
-﻿// seedump.c  独立 iOS 命令行工具（DumpDecrypter 路子）
+// seedump.c  独立 iOS 命令行工具（DumpDecrypter 路子）
 //
 // 用 task_for_pid 附加到运行中的元气骑士，直接读内存里的 ItemInfo.Seeds / Blueprints，
 // 把全部种子名 / 蓝图名写成文本文件。不改游戏包、不 hook、不需要 Frida。

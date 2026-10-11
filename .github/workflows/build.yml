@@ -1,0 +1,38 @@
+﻿name: build-seedump
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示工具链
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: 编译 arm64 iOS 命令行工具
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -target arm64-apple-ios14.0 \
+                -isysroot "$SDK" \
+                -O2 -Wall -Wextra \
+                -o seedump seedump.c
+          echo "--- 产物 ---"
+          file seedump
+          ls -l seedump
+          echo "--- 需要的 load command ---"
+          otool -l seedump | grep -A3 LC_BUILD_VERSION | head -20
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedump-arm64
+          path: |
+            seedump
+            ents.plist
+          if-no-files-found: error

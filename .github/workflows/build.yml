@@ -22,17 +22,36 @@ jobs:
                 -isysroot "$SDK" \
                 -O2 -Wall -Wextra \
                 -o seedump seedump.c
-          echo "--- 产物 ---"
           file seedump
           ls -l seedump
-          echo "--- 需要的 load command ---"
-          otool -l seedump | grep -A3 LC_BUILD_VERSION | head -20
+
+      - name: 用 ldid 签名（带上 task_for_pid-allow）
+        run: |
+          brew install ldid || true
+          if command -v ldid >/dev/null 2>&1; then
+            ldid -Sents.plist seedump
+            echo "signed ok"
+            ldid -e seedump || true
+          else
+            echo "!! ldid 不可用，产物未签名"
+            exit 1
+          fi
+          file seedump
+
+      - name: 打包 deb（rootless + rootful 各一个）
+        run: |
+          chmod +x makedeb.sh
+          ./makedeb.sh iphoneos-arm64 seedump seedump_rootless.deb
+          ./makedeb.sh iphoneos-arm   seedump seedump_rootful.deb
+          ls -l *.deb
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: seedump-arm64
+          name: seedump-debs
           path: |
             seedump
             ents.plist
+            seedump_rootless.deb
+            seedump_rootful.deb
           if-no-files-found: error

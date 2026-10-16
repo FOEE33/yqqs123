@@ -16,6 +16,7 @@
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <mach-o/dyld.h>
+#include <dispatch/dispatch.h>
 
 #define RVA_SLOT_ITEMINFO    0x12088D60ULL  // ItemInfo metadata usage 槽（运行时存 Il2CppClass*）
 #define OFF_CLASS_STATICFLD  0xB8ULL        // Il2CppClass.static_fields
@@ -27,6 +28,10 @@
 #define OFF_ROW_NAME         0x10ULL        // ItemInfoRow.Name
 #define OFF_STR_LEN          0x10ULL
 #define OFF_STR_CHARS        0x14ULL
+
+#define RVA_GET_DATA    0x6A67A94ULL   // ItemData.get_data()
+#define RVA_ADD_SEED    0x6A6A394ULL   // ItemData.AddSeed(string,int,bool)
+#define SEED_VAL        2011999999
 
 #define MAXNAMES 4096
 #define POLL_MAX 3600                       // 最多轮询 1 小时
@@ -162,18 +167,75 @@ static int try_dump(void) {
     return (ns > 0) ? 1 : 0;
 }
 
+
+static uint64_t g_seedstr[MAXNAMES];
+static int      g_nseed = 0;
+
+// 读 ItemInfo.Seeds，把每个 ItemInfoRow.Name(string*) 收下来
+static int collect_seeds(void) {
+    uint64_t klass, sf, info, list, items;
+    int32_t n, i;
+    if (!g_base) find_base();
+    if (!g_base) return 0;
+    klass = rd64(g_base + RVA_SLOT_ITEMINFO);
+    if (klass < 0x100000000ULL || klass > 0x0000010000000000ULL) return 0;
+    sf = rd64(klass + OFF_CLASS_STATICFLD);
+    if (sf < 0x100000000ULL) return 0;
+    info = rd64(sf);
+    if (info < 0x100000000ULL) return 0;
+    list = rd64(info + OFF_SEEDS);
+    if (list < 0x100000000ULL) return 0;
+    n = (int32_t)rd32(list + OFF_LIST_SIZE);
+    items = rd64(list + OFF_LIST_ITEMS);
+    if (n <= 0 || n > MAXNAMES || items < 0x100000000ULL) return 0;
+    g_nseed = 0;
+    for (i = 0; i < n; i++) {
+        uint64_t row = rd64(items + OFF_ARRAY_DATA + (uint64_t)i * 8);
+        uint64_t sp;
+        if (row < 0x100000000ULL) continue;
+        sp = rd64(row + OFF_ROW_NAME);
+        if (sp < 0x100000000ULL) continue;
+        g_seedstr[g_nseed++] = sp;
+    }
+    return g_nseed;
+}
+
+// 在 Unity 主线程上跑：直接调游戏自己的托管方法把字典填满
+static void fill_on_main(void *ctx) {
+    void *(*get_data)(void) = (void *(*)(void))(uintptr_t)(g_base + RVA_GET_DATA);
+    void (*add_seed)(void *, void *, int32_t, int32_t) =
+        (void (*)(void *, void *, int32_t, int32_t))(uintptr_t)(g_base + RVA_ADD_SEED);
+    void *item;
+    char msg[200];
+    int i, ok = 0;
+    (void)ctx;
+    item = get_data();
+    if (!item) { note("ItemData.get_data() 返回空，放弃填充"); return; }
+    for (i = 0; i < g_nseed; i++) {
+        add_seed(item, (void *)(uintptr_t)g_seedstr[i], SEED_VAL, 1);
+        ok++;
+    }
+    snprintf(msg, sizeof(msg), "已把 %d 个种子写进存档字典（值 %d, save=true）", ok, SEED_VAL);
+    note(msg);
+}
+
 static void *worker(void *arg) {
-    int i, logged = 0;
+    int i;
     (void)arg;
     note("--- seedump 已加载，开始轮询 ---");
     for (i = 0; i < POLL_MAX; i++) {
         char p[1200];
-        if (try_dump()) return NULL;
-        if (!logged || i % 30 == 29) {
-            snprintf(p, sizeof(p), "第 %d 次：ItemInfo/种子表还没就绪（base=0x%llx）",
+        if (collect_seeds() > 0) {
+            try_dump();
+            snprintf(p, sizeof(p), "种子表就绪：%d 条，切主线程填充字典", g_nseed);
+            note(p);
+            dispatch_async_f(dispatch_get_main_queue(), NULL, fill_on_main);
+            return NULL;
+        }
+        if (i % 30 == 0) {
+            snprintf(p, sizeof(p), "第 %d 次：种子表还没就绪（base=0x%llx）",
                      i + 1, (unsigned long long)g_base);
             note(p);
-            logged = 1;
         }
         sleep(1);
     }

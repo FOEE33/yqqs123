@@ -210,11 +210,26 @@ static void refill_on_main(void *ctx) {
     void (*add_seed)(void *, void *, int32_t, int32_t) =
         (void (*)(void *, void *, int32_t, int32_t))(uintptr_t)(g_base + RVA_ADD_SEED);
     void *item;
-    char msg[200];
-    int i, fixed = 0;
+    char msg[240];
+    int i, need = 0, fixed = 0;
+    int32_t sample = -1;
+    static int round = 0;
     (void)ctx;
     item = get_data();
-    if (!item) return;
+    if (!item) { note("refill: ItemData.get_data() 返回空"); return; }
+
+    // 先摸底：数一遍哪些不足
+    for (i = 0; i < g_nseed; i++) {
+        if (get_count(item, (void *)(uintptr_t)g_seedstr[i]) < 1000) need++;
+    }
+    if (g_nseed > 0) sample = get_count(item, (void *)(uintptr_t)g_seedstr[0]);
+
+    // 无条件记录，日志里能直接看到结果
+    snprintf(msg, sizeof(msg),
+             "第 %d 轮：共 %d 个种子，不足 1000 的有 %d 个；样本[0] = %d",
+             ++round, g_nseed, need, (int)sample);
+    note(msg);
+
     for (i = 0; i < g_nseed; i++) {
         void *nm = (void *)(uintptr_t)g_seedstr[i];
         if (get_count(item, nm) < 1000) {
@@ -223,7 +238,7 @@ static void refill_on_main(void *ctx) {
         }
     }
     if (fixed > 0) {
-        snprintf(msg, sizeof(msg), "补满 %d 个种子（值 %d）", fixed, SEED_VAL);
+        snprintf(msg, sizeof(msg), "  -> 已补满 %d 个（值 %d）", fixed, SEED_VAL);
         note(msg);
     }
 }

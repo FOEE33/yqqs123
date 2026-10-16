@@ -31,7 +31,9 @@
 
 #define RVA_GET_DATA    0x6A67A94ULL   // ItemData.get_data()
 #define RVA_ADD_SEED    0x6A6A394ULL   // ItemData.AddSeed(string,int,bool)
+#define RVA_GET_SEEDCNT 0x6A6F1E0ULL   // ItemData.GetSeedCount(string)
 #define SEED_VAL        2011999999
+#define REFILL_INTERVAL 3              // 秒：每隔这么久查一次，少了就补满
 
 #define MAXNAMES 4096
 #define POLL_MAX 3600                       // 最多轮询 1 小时
@@ -201,45 +203,56 @@ static int collect_seeds(void) {
 }
 
 // 在 Unity 主线程上跑：直接调游戏自己的托管方法把字典填满
-static void fill_on_main(void *ctx) {
+static void refill_on_main(void *ctx) {
     void *(*get_data)(void) = (void *(*)(void))(uintptr_t)(g_base + RVA_GET_DATA);
+    int32_t (*get_count)(void *, void *) =
+        (int32_t (*)(void *, void *))(uintptr_t)(g_base + RVA_GET_SEEDCNT);
     void (*add_seed)(void *, void *, int32_t, int32_t) =
         (void (*)(void *, void *, int32_t, int32_t))(uintptr_t)(g_base + RVA_ADD_SEED);
     void *item;
     char msg[200];
-    int i, ok = 0;
+    int i, fixed = 0;
     (void)ctx;
     item = get_data();
-    if (!item) { note("ItemData.get_data() 返回空，放弃填充"); return; }
+    if (!item) return;
     for (i = 0; i < g_nseed; i++) {
-        add_seed(item, (void *)(uintptr_t)g_seedstr[i], SEED_VAL, 1);
-        ok++;
+        void *nm = (void *)(uintptr_t)g_seedstr[i];
+        if (get_count(item, nm) < 1000) {
+            add_seed(item, nm, SEED_VAL, 1);
+            fixed++;
+        }
     }
-    snprintf(msg, sizeof(msg), "已把 %d 个种子写进存档字典（值 %d, save=true）", ok, SEED_VAL);
-    note(msg);
+    if (fixed > 0) {
+        snprintf(msg, sizeof(msg), "补满 %d 个种子（值 %d）", fixed, SEED_VAL);
+        note(msg);
+    }
 }
 
 static void *worker(void *arg) {
     int i;
     (void)arg;
-    note("--- seedump 已加载，开始轮询 ---");
+    note("--- seedump 已加载，等待种子表 ---");
     for (i = 0; i < POLL_MAX; i++) {
-        char p[1200];
-        if (collect_seeds() > 0) {
-            try_dump();
-            snprintf(p, sizeof(p), "种子表就绪：%d 条，切主线程填充字典", g_nseed);
-            note(p);
-            dispatch_async_f(dispatch_get_main_queue(), NULL, fill_on_main);
-            return NULL;
-        }
+        if (collect_seeds() > 0) break;
         if (i % 30 == 0) {
+            char p[1200];
             snprintf(p, sizeof(p), "第 %d 次：种子表还没就绪（base=0x%llx）",
                      i + 1, (unsigned long long)g_base);
             note(p);
         }
         sleep(1);
     }
-    note("超时放弃（一直没等到种子表）");
+    if (g_nseed <= 0) { note("超时：一直没等到种子表"); return NULL; }
+    {
+        char p[1200];
+        try_dump();
+        snprintf(p, sizeof(p), "种子表就绪：%d 条，开始持续回写（每 %d 秒）", g_nseed, REFILL_INTERVAL);
+        note(p);
+    }
+    for (;;) {
+        dispatch_async_f(dispatch_get_main_queue(), NULL, refill_on_main);
+        sleep(REFILL_INTERVAL);
+    }
     return NULL;
 }
 
